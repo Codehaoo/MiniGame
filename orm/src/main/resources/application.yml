@@ -1,0 +1,8 @@
+spring:
+  data:
+    mongodb:
+      auto-index-creation: true
+  mongodb:
+    host: localhost
+    port: 27017
+    database: game
