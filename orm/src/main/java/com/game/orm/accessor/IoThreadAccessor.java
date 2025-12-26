@@ -2,11 +2,9 @@ package com.game.orm.accessor;
 
 import com.game.orm.base.EventBus;
 import com.game.orm.entity.AbstractEntity;
-import org.springframework.data.mongodb.core.query.Update;
 
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 public class IoThreadAccessor implements IAccessor {
 
@@ -44,16 +42,15 @@ public class IoThreadAccessor implements IAccessor {
     }
 
     @Override
-    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void update(E entity, Update update) {
-        EventBus.execute(entity.ThreadRouteKey(), () -> delegate.update(entity, update));
+    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void update(E entity) {
+        EventBus.execute(entity.ThreadRouteKey(), () -> delegate.update(entity));
     }
 
     @Override
-    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void batchUpdate(List<E> entities, List<Update> updates) {
-        IntStream.range(0, entities.size())
-                .mapToObj(i -> Map.entry(entities.get(i), updates.get(i)))
-                .collect(Collectors.groupingBy(entry -> EventBus.executorOf(entry.getKey().ThreadRouteKey())))
-                .forEach((executor, entries) -> executor.execute(() -> delegate.batchUpdate(entries.stream().map(Map.Entry::getKey).toList(), entries.stream().map(Map.Entry::getValue).toList())));
+    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void batchUpdate(List<E> entities) {
+        entities.stream()
+                .collect(Collectors.groupingBy(entity -> EventBus.executorOf(entity.ThreadRouteKey())))
+                .forEach((executor, result) -> executor.execute(() -> delegate.batchUpdate(result)));
     }
 
     @Override

@@ -1,19 +1,21 @@
 package com.game.orm.entity;
 
-import com.game.orm.util.ObjectCloner;
-import com.google.gson.Gson;
+import com.alibaba.fastjson2.JSON;
+import lombok.Getter;
 import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.mongodb.core.query.Update;
 
-import java.io.Serializable;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
-public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEntity<PK>, Serializable {
+@Slf4j
+public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEntity<PK> {
 
     @Id
     @Setter
@@ -25,14 +27,16 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
     }
 
     private static final Map<Class<?>, List<Field>> ENTITY_FIELDS_MAP = new ConcurrentHashMap<>();
-    private static final Gson GSON = new Gson();
 
     @Transient
     private final Map<String, Integer> fieldNameHash = new HashMap<>();
     @Transient
     private final Map<String, String> fieldNameJson = new HashMap<>();
+    @Transient
+    @Getter
+    private final Queue<Update> updateQueue = new ConcurrentLinkedQueue<>();
 
-    public Optional<Update> checkUpdateFields() {
+    public boolean checkUpdateFields() {
         Update update = new Update();
         boolean hasUpdate = false;
         List<Field> fields = getAllPersistFields();
@@ -40,6 +44,9 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
             field.setAccessible(true);
             try {
                 String fieldName = field.getName();
+                if ("id".equals(fieldName)) {
+                    continue;
+                }
                 Object value = field.get(this);
                 if (value == null) {
                     if (fieldNameHash.containsKey(fieldName) || fieldNameJson.containsKey(fieldName)) {
@@ -52,22 +59,31 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
                     int hashCode = value.hashCode();
                     if (!fieldNameHash.containsKey(fieldName) || fieldNameHash.get(fieldName) != hashCode) {
                         fieldNameHash.put(fieldName, hashCode);
-                        Serializable clone = ObjectCloner.clone(value);
-                        if (clone != null) {
-                            update.set(fieldName, clone);
-                            hasUpdate = true;
-                        }
-                        if (needCheckJson(value)) {
-                            String json = GSON.toJson(value);
+                        String json = null;
+                        if (needCheckJsonNode(value)) {
+                            json = JSON.toJSONString(value);
                             fieldNameJson.put(fieldName, json);
                         }
+                        if (isImmutableType(value)) {
+                            update.set(fieldName, value);
+                            hasUpdate = true;
+                        } else {
+                            if (json == null) {
+                                json = JSON.toJSONString(value);
+                            }
+                            Object clone = JSON.parseObject(json, value.getClass());
+                            if (clone != null) {
+                                update.set(fieldName, clone);
+                                hasUpdate = true;
+                            }
+                        }
                     } else {
-                        // hashcode一致再转json检测是否一致
-                        if (needCheckJson(value)) {
-                            String json = GSON.toJson(value);
+                        // hashcode一致再转jsonNode检测是否一致
+                        if (needCheckJsonNode(value)) {
+                            String json = JSON.toJSONString(value);
                             if (!fieldNameJson.containsKey(fieldName) || !fieldNameJson.get(fieldName).equals(json)) {
                                 fieldNameJson.put(fieldName, json);
-                                Serializable clone = ObjectCloner.clone(value);
+                                Object clone = JSON.parseObject(json, value.getClass());
                                 if (clone != null) {
                                     update.set(fieldName, clone);
                                     hasUpdate = true;
@@ -77,11 +93,15 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
                     }
                 }
             } catch (IllegalAccessException e) {
-                throw new RuntimeException(e);
+                log.error("{} {} field value get error, id={}", this.getClass().getName(), field.getName(), id, e);
             }
         }
 
-        return hasUpdate ? Optional.of(update) : Optional.empty();
+        if (hasUpdate) {
+            updateQueue.offer(update);
+        }
+
+        return !updateQueue.isEmpty();
     }
 
     private List<Field> getAllPersistFields() {
@@ -105,10 +125,40 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
         });
     }
 
-    private boolean needCheckJson(Object obj) {
+    private boolean needCheckJsonNode(Object obj) {
+        // 一定不发生哈希碰撞
         if (obj instanceof Boolean || obj instanceof Byte || obj instanceof Short || obj instanceof Character || obj instanceof Integer) {
             return false;
         }
         return true;
+    }
+
+    private boolean isImmutableType(Object obj) {
+        if (obj instanceof Boolean || obj instanceof Byte || obj instanceof Short || obj instanceof Character ||
+                obj instanceof Integer || obj instanceof Long || obj instanceof Float || obj instanceof Double) {
+            return true;
+        }
+
+        if (obj instanceof String || obj instanceof Enum) {
+            return true;
+        }
+
+        if (obj instanceof java.math.BigInteger || obj instanceof java.math.BigDecimal) {
+            return true;
+        }
+
+        if (obj instanceof java.time.LocalDate ||
+                obj instanceof java.time.LocalDateTime ||
+                obj instanceof java.time.LocalTime ||
+                obj instanceof java.time.Instant ||
+                obj instanceof java.time.ZonedDateTime) {
+            return true;
+        }
+
+        if (obj instanceof java.util.UUID) {
+            return true;
+        }
+
+        return false;
     }
 }

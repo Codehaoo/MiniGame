@@ -71,11 +71,17 @@ public class MongoAccessor implements IAccessor {
     }
 
     @Override
-    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void update(E entity, Update update) {
+    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void update(E entity) {
         try {
+            Update update = entity.getUpdateQueue().peek();
+            if (update == null) {
+                return;
+            }
             UpdateResult result = mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(entity.id())), update, entity.getClass());
             if (result.getModifiedCount() != 1) {
                 log.error("{} update error, expected update 1, updated {}", entity.getClass().getSimpleName(), result.getModifiedCount());
+            } else {
+                entity.getUpdateQueue().remove(update);
             }
         } catch (Exception e) {
             log.error("{} update error", entity.getClass().getSimpleName(), e);
@@ -83,13 +89,18 @@ public class MongoAccessor implements IAccessor {
     }
 
     @Override
-    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void batchUpdate(List<E> entities, List<Update> updates) {
-        if (CollectionUtils.isEmpty(entities) || CollectionUtils.isEmpty(updates)) {
+    public <PK extends Comparable<PK>, E extends AbstractEntity<PK>> void batchUpdate(List<E> entities) {
+        if (CollectionUtils.isEmpty(entities)) {
             return;
         }
-        List<Pair<Query, UpdateDefinition>> pairs = new ArrayList<>(updates.size());
-        for (int i = 0; i < updates.size(); i++) {
-            pairs.add(Pair.of(new Query(Criteria.where("_id").is(entities.get(i).id())), updates.get(i)));
+        List<Pair<E, Update>> entityUpdates = new ArrayList<>(entities.size());
+        List<Pair<Query, UpdateDefinition>> pairs = new ArrayList<>(entities.size());
+        for (E entity : entities) {
+            Update update = entity.getUpdateQueue().peek();
+            if (update != null) {
+                entityUpdates.add(Pair.of(entity, update));
+                pairs.add(Pair.of(new Query(Criteria.where("_id").is(entity.id())), update));
+            }
         }
         try {
             // ORDERED: 有序执行，遇到错误停止
@@ -97,7 +108,10 @@ public class MongoAccessor implements IAccessor {
             BulkOperations bulkOps = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, entities.getFirst().getClass());
             BulkWriteResult result = bulkOps.updateMulti(pairs).execute();
             if (result.getModifiedCount() != pairs.size()) {
+                // todo 检测哪些成功并移除
                 log.error("{} update error, expected update {}, updated {}", entities.getFirst().getClass().getSimpleName(), pairs.size(), result.getModifiedCount());
+            } else {
+                entityUpdates.forEach(pair -> pair.getFirst().getUpdateQueue().remove(pair.getSecond()));
             }
         } catch (Exception e) {
             log.error("{} update error", entities.getFirst().getClass().getSimpleName(), e);
