@@ -59,7 +59,7 @@ public class EntityService implements Container {
     private <PK extends Comparable<PK>, E extends AbstractEntity<PK>> E load(PK Id, Class<E> clazz) {
         try {
             E e = accessor.find(Id, clazz);
-            // todo 计算hashcode和jsonNode
+            // todo 计算hashcode和json
             if (e == null) {
                 e = clazz.getDeclaredConstructor().newInstance();
                 e.setId(Id);

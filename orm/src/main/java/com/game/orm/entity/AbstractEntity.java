@@ -60,7 +60,7 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
                     if (!fieldNameHash.containsKey(fieldName) || fieldNameHash.get(fieldName) != hashCode) {
                         fieldNameHash.put(fieldName, hashCode);
                         String json = null;
-                        if (needCheckJsonNode(value)) {
+                        if (needCheckJson(value)) {
                             json = JSON.toJSONString(value);
                             fieldNameJson.put(fieldName, json);
                         }
@@ -78,8 +78,8 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
                             }
                         }
                     } else {
-                        // hashcode一致再转jsonNode检测是否一致
-                        if (needCheckJsonNode(value)) {
+                        // hashcode一致再转json检测是否一致
+                        if (needCheckJson(value)) {
                             String json = JSON.toJSONString(value);
                             if (!fieldNameJson.containsKey(fieldName) || !fieldNameJson.get(fieldName).equals(json)) {
                                 fieldNameJson.put(fieldName, json);
@@ -125,7 +125,7 @@ public abstract class AbstractEntity<PK extends Comparable<PK>> implements IEnti
         });
     }
 
-    private boolean needCheckJsonNode(Object obj) {
+    private boolean needCheckJson(Object obj) {
         // 一定不发生哈希碰撞
         if (obj instanceof Boolean || obj instanceof Byte || obj instanceof Short || obj instanceof Character || obj instanceof Integer) {
             return false;
